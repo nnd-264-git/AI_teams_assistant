@@ -1,5 +1,13 @@
 .env
 tenants.json
+meetings.json
+meeting-poc-*.txt
 __pycache__/
 *.pyc
 *.pptx
+live-bot/
+bot_export/
+bot_export.zip
+browser-bot/
+*.pem
+windows-*.txt

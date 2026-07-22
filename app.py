@@ -1,6 +1,6 @@
 import streamlit as st
 
-from src import aws_pipeline, bot_service, graph_client, tenant_store
+from src import aws_pipeline, bot_service, graph_client, meeting_store, scheduler_service, tenant_store
 
 st.set_page_config(
     page_title="Enterprise AI Meeting Assistant",
@@ -133,6 +133,7 @@ if "transcript" not in st.session_state:
     st.session_state.segments = []
     st.session_state.summary = None
     st.session_state.chat_history = []
+    st.session_state.recording_bytes = None
 
 query_params = st.query_params
 if query_params.get("admin_consent") == "True" and "tenant" in query_params:
@@ -203,8 +204,45 @@ with st.sidebar:
                 st.session_state.transcript = result["transcript"]
                 st.session_state.segments = result["segments"]
                 st.session_state.summary = result["summary"]
+                st.session_state.recording_bytes = result.get("recording_bytes")
                 st.session_state.chat_history = []
                 st.session_state.speaker_colors = {}
+
+    with st.expander("📅 Auto-Detected Meetings"):
+        st.caption(
+            "Detects meetings from the organizer's calendar automatically, and "
+            "processes them once they've ended - no manual IDs needed. Live "
+            "join isn't active yet (pending Microsoft's real-time media "
+            "approval - see plan.md), so processing happens after the meeting ends."
+        )
+        scan_user_id = st.text_input("Organizer user ID / UPN", key="scan_user_id")
+        scan_tenant_options = {t["label"]: t["tenant_id"] for t in tenant_store.list_tenants()}
+        scan_tenant_id = None
+        if scan_tenant_options:
+            scan_label = st.selectbox("Client", list(scan_tenant_options.keys()), key="scan_client")
+            scan_tenant_id = scan_tenant_options[scan_label]
+        if st.button("🔄 Check calendar now", use_container_width=True) and scan_user_id:
+            with st.spinner("Checking calendar and processing any finished meetings..."):
+                new_meetings = scheduler_service.detect_new_meetings(scan_user_id, scan_tenant_id)
+                processed = scheduler_service.process_due_meetings(scan_tenant_id)
+                st.success(f"{len(new_meetings)} new meeting(s) detected, {len(processed)} processed.")
+
+        tracked = meeting_store.list_meetings()
+        if tracked:
+            for m in sorted(tracked, key=lambda x: x["start"], reverse=True):
+                status_icon = {"scheduled": "🕒", "processed": "✅", "failed": "⚠️"}.get(m["status"], "•")
+                cols = st.columns([4, 1])
+                cols[0].caption(f"{status_icon} **{m['subject']}** — {m['start'][:16].replace('T', ' ')} ({m['status']})")
+                if m["status"] == "processed" and cols[1].button("View", key=f"view_{m['event_id']}"):
+                    st.session_state.transcript = m["transcript"]
+                    st.session_state.segments = m["segments"]
+                    st.session_state.summary = m["summary"]
+                    st.session_state.recording_bytes = None
+                    st.session_state.chat_history = []
+                    st.session_state.speaker_colors = {}
+                    st.rerun()
+        else:
+            st.caption("No meetings tracked yet.")
 
 if st.session_state.transcript:
     transcript = st.session_state.transcript
@@ -220,6 +258,9 @@ if st.session_state.transcript:
         f'{summary.get("summary", "No summary generated.")}</p></div>',
         unsafe_allow_html=True,
     )
+
+    if st.session_state.get("recording_bytes"):
+        st.audio(st.session_state.recording_bytes)
 
     st.markdown(
         f'<div class="mx-stats">{len(transcript.split()):,} words &bull; '
