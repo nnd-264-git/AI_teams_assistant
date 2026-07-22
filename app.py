@@ -1,6 +1,6 @@
 import streamlit as st
 
-from src import aws_pipeline, bot_service, config, graph_client, meeting_store, scheduler_service, tenant_store
+from src import aws_pipeline, bot_service, browser_bot_ingest, config, graph_client, meeting_store, scheduler_service, tenant_store
 
 st.set_page_config(
     page_title="Enterprise AI Meeting Assistant",
@@ -221,16 +221,21 @@ with st.sidebar:
             scan_tenant_id = scan_tenant_options[scan_label]
 
         if "auto_scanned" not in st.session_state:
-            with st.spinner("Checking calendar and processing any finished meetings..."):
+            with st.spinner("Checking calendar and browser-bot captures..."):
                 scheduler_service.detect_new_meetings(config.ORGANIZER_UPN, scan_tenant_id)
                 scheduler_service.process_due_meetings(scan_tenant_id)
+                browser_bot_ingest.process_browser_bot_captures()
             st.session_state.auto_scanned = True
 
         if st.button("🔄 Check calendar now", use_container_width=True):
-            with st.spinner("Checking calendar and processing any finished meetings..."):
+            with st.spinner("Checking calendar and browser-bot captures..."):
                 new_meetings = scheduler_service.detect_new_meetings(config.ORGANIZER_UPN, scan_tenant_id)
                 processed = scheduler_service.process_due_meetings(scan_tenant_id)
-                st.success(f"{len(new_meetings)} new meeting(s) detected, {len(processed)} processed.")
+                bot_processed = browser_bot_ingest.process_browser_bot_captures()
+                st.success(
+                    f"{len(new_meetings)} new meeting(s) detected, {len(processed)} processed, "
+                    f"{len(bot_processed)} browser-bot capture(s) processed."
+                )
 
         tracked = meeting_store.list_meetings()
         if tracked:

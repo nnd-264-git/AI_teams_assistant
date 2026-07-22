@@ -33,6 +33,20 @@ def upload_bytes(data: bytes, key: str) -> str:
     return f"s3://{config.S3_BUCKET}/{key}"
 
 
+def list_s3_prefix(prefix: str) -> list:
+    s3 = _session().client("s3")
+    paginator = s3.get_paginator("list_objects_v2")
+    keys = []
+    for page in paginator.paginate(Bucket=config.S3_BUCKET, Prefix=prefix):
+        keys.extend(obj["Key"] for obj in page.get("Contents", []))
+    return keys
+
+
+def download_bytes(key: str) -> bytes:
+    s3 = _session().client("s3")
+    return s3.get_object(Bucket=config.S3_BUCKET, Key=key)["Body"].read()
+
+
 def _seconds_to_hhmmss(seconds_str: str) -> str:
     total = int(float(seconds_str))
     h, rem = divmod(total, 3600)
