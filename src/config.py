@@ -13,3 +13,7 @@ AZURE_TENANT_ID = os.getenv("AZURE_TENANT_ID")
 AZURE_CLIENT_ID = os.getenv("AZURE_CLIENT_ID")
 AZURE_CLIENT_SECRET = os.getenv("AZURE_CLIENT_SECRET")
 GRAPH_SCOPE = ["https://graph.microsoft.com/.default"]
+
+# The organizer whose calendar is scanned for meetings - single-tenant POC,
+# so this is fixed rather than asked for in the UI.
+ORGANIZER_UPN = os.getenv("ORGANIZER_UPN", "nikhil.kumawat@pssgway.com")

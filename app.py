@@ -1,6 +1,6 @@
 import streamlit as st
 
-from src import aws_pipeline, bot_service, graph_client, meeting_store, scheduler_service, tenant_store
+from src import aws_pipeline, bot_service, config, graph_client, meeting_store, scheduler_service, tenant_store
 
 st.set_page_config(
     page_title="Enterprise AI Meeting Assistant",
@@ -196,11 +196,10 @@ with st.sidebar:
             selected_tenant_id = tenant_options[selected_label]
         else:
             st.caption("No clients onboarded yet — use Client Onboarding above, or this falls back to the default tenant in .env.")
-        user_id = st.text_input("Organizer user ID / UPN")
         meeting_id = st.text_input("Online meeting ID")
         if st.button("▶ Fetch & process", use_container_width=True, type="primary"):
             with st.spinner("Fetching from Teams and processing..."):
-                result = bot_service.process_teams_meeting(user_id, meeting_id, selected_tenant_id)
+                result = bot_service.process_teams_meeting(config.ORGANIZER_UPN, meeting_id, selected_tenant_id)
                 st.session_state.transcript = result["transcript"]
                 st.session_state.segments = result["segments"]
                 st.session_state.summary = result["summary"]
@@ -215,15 +214,21 @@ with st.sidebar:
             "join isn't active yet (pending Microsoft's real-time media "
             "approval - see plan.md), so processing happens after the meeting ends."
         )
-        scan_user_id = st.text_input("Organizer user ID / UPN", key="scan_user_id")
         scan_tenant_options = {t["label"]: t["tenant_id"] for t in tenant_store.list_tenants()}
         scan_tenant_id = None
         if scan_tenant_options:
             scan_label = st.selectbox("Client", list(scan_tenant_options.keys()), key="scan_client")
             scan_tenant_id = scan_tenant_options[scan_label]
-        if st.button("🔄 Check calendar now", use_container_width=True) and scan_user_id:
+
+        if "auto_scanned" not in st.session_state:
             with st.spinner("Checking calendar and processing any finished meetings..."):
-                new_meetings = scheduler_service.detect_new_meetings(scan_user_id, scan_tenant_id)
+                scheduler_service.detect_new_meetings(config.ORGANIZER_UPN, scan_tenant_id)
+                scheduler_service.process_due_meetings(scan_tenant_id)
+            st.session_state.auto_scanned = True
+
+        if st.button("🔄 Check calendar now", use_container_width=True):
+            with st.spinner("Checking calendar and processing any finished meetings..."):
+                new_meetings = scheduler_service.detect_new_meetings(config.ORGANIZER_UPN, scan_tenant_id)
                 processed = scheduler_service.process_due_meetings(scan_tenant_id)
                 st.success(f"{len(new_meetings)} new meeting(s) detected, {len(processed)} processed.")
 
@@ -243,6 +248,17 @@ with st.sidebar:
                     st.rerun()
         else:
             st.caption("No meetings tracked yet.")
+
+        if not st.session_state.transcript and tracked:
+            processed_meetings = [m for m in tracked if m["status"] == "processed"]
+            if processed_meetings:
+                latest = max(processed_meetings, key=lambda x: x["start"])
+                st.session_state.transcript = latest["transcript"]
+                st.session_state.segments = latest["segments"]
+                st.session_state.summary = latest["summary"]
+                st.session_state.recording_bytes = None
+                st.session_state.chat_history = []
+                st.session_state.speaker_colors = {}
 
 if st.session_state.transcript:
     transcript = st.session_state.transcript
@@ -321,8 +337,8 @@ if st.session_state.transcript:
 else:
     st.markdown(
         '<div class="mx-panel"><h4>👋 Get started</h4>'
-        "<p>Enter the organizer's user ID and the online meeting ID in the sidebar, then click "
-        "<b>Fetch &amp; process</b> to pull the Teams transcript and see the summary, decisions, "
-        "action items, and chat appear here.</p></div>",
+        "<p>No processed meetings yet. Once a tracked meeting finishes, its transcript, summary, "
+        "decisions, action items, and chat will appear here automatically — or upload a "
+        "recording/transcript from the sidebar to process one right now.</p></div>",
         unsafe_allow_html=True,
     )
